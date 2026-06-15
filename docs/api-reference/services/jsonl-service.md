@@ -2,7 +2,7 @@
 
 ## Description
 
-Service principal de stockage et de manipulation de fichiers JSONL (JSON Lines). Il gère l'écriture, la lecture, la recherche, le nettoyage et le verrouillage de fichiers JSONL. Le service est **stateless** : tout l'état (verrous, buffer) est déporté dans un contexte injecté.
+Service principal de stockage et de manipulation de fichiers JSONL (JSON Lines). Il gère l'écriture, la lecture, la recherche, le nettoyage et le verrouillage de fichiers JSONL. Le service est **stateless** : tout l'état (verrous, buffer, traitement) est déporté dans un `JsonlContext` injecté.
 
 ## Hiérarchie / Implémentations
 
@@ -16,7 +16,7 @@ JsonlLockInterface
 
 ## Rôle principal
 
-Centralise toutes les opérations sur les fichiers JSONL en s'appuyant sur une stratégie de chemin (`JsonlPathStrategyInterface`) pour déterminer l'emplacement des fichiers. Le service est conçu sans état interne : les locks et le buffer sont gérés par un `JsonlContext` injecté, permettant une meilleure testabilité et une architecture plus propre.
+Centralise toutes les opérations sur les fichiers JSONL en s'appuyant sur une stratégie de chemin (`JsonlPathStrategyInterface`) pour déterminer l'emplacement des fichiers. Le service est conçu sans état interne : les locks, le buffer et l'état de traitement sont gérés par un `JsonlContext` injecté, permettant une meilleure testabilité et une architecture plus propre.
 
 ## Détails
 
@@ -24,13 +24,12 @@ Centralise toutes les opérations sur les fichiers JSONL en s'appuyant sur une s
 
 ## API / Méthodes publiques
 
-### `write(AbstractRecord $entity, bool $lock = true, ?JsonlProcessingContext $context = null): void`
+### `write(AbstractRecord $entity, bool $lock = true): void`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$entity` | `AbstractRecord` | L'entité à écrire (LogJsonlRecord ou CacheJsonlRecord) |
 | `$lock` | `bool` | Active le verrouillage exclusif du fichier (défaut: true) |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel pour suivre l'opération |
 
 **Retourne :** `void`
 
@@ -45,13 +44,12 @@ $service->write($record);
 
 ---
 
-### `writeBatch(array $entities, bool $lock = true, ?JsonlProcessingContext $context = null): void`
+### `writeBatch(array $entities, bool $lock = true): void`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$entities` | `array<AbstractRecord>` | Liste des entités à écrire |
 | `$lock` | `bool` | Active le verrouillage exclusif |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `void`
 
@@ -65,12 +63,11 @@ $service->writeBatch($records);
 
 ---
 
-### `writeBuffered(AbstractRecord $entity, ?JsonlProcessingContext $context = null): void`
+### `writeBuffered(AbstractRecord $entity): void`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$entity` | `AbstractRecord` | Entité à mettre en buffer |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `void`
 
@@ -83,12 +80,11 @@ $service->flushBuffer(); // Écriture disque
 
 ---
 
-### `flushBuffer(?string $filePath = null, ?JsonlProcessingContext $context = null): void`
+### `flushBuffer(?string $filePath = null): void`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePath` | `string|null` | Chemin spécifique ou null pour tout vider |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `void`
 
@@ -131,12 +127,11 @@ $service->onFlush(function ($filePath, $count) {
 
 ---
 
-### `readAll(string $filePath, ?JsonlProcessingContext $context = null): array`
+### `readAll(string $filePath): array`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePath` | `string` | Chemin du fichier à lire |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `array<array<string, mixed>>` - Toutes les lignes du fichier
 
@@ -152,13 +147,12 @@ foreach ($lines as $line) {
 
 ---
 
-### `readLineByLine(string $filePath, callable $callback, ?JsonlProcessingContext $context = null): void`
+### `readLineByLine(string $filePath, callable $callback): void`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePath` | `string` | Chemin du fichier |
 | `$callback` | `callable(array<string, mixed> $line): void` | Fonction appelée pour chaque ligne |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `void`
 
@@ -173,13 +167,12 @@ $service->readLineByLine('/logs/file.jsonl', function ($line) {
 
 ---
 
-### `search(string $filePath, callable $filter, ?JsonlProcessingContext $context = null): array`
+### `search(string $filePath, callable $filter): array`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePath` | `string` | Chemin du fichier |
 | `$filter` | `callable(array<string, mixed> $line): bool` | Fonction de filtrage |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `array<array<string, mixed>>` - Lignes qui satisfont le filtre
 
@@ -192,47 +185,43 @@ $errors = $service->search('/logs/14.jsonl', function ($line) {
 
 ---
 
-### `searchMultiple(array $filePaths, callable $filter, ?JsonlProcessingContext $context = null): array`
+### `searchMultiple(array $filePaths, callable $filter): array`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePaths` | `array<string>` | Liste des chemins à scanner |
 | `$filter` | `callable(array<string, mixed> $line): bool` | Fonction de filtrage |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `array<array<string, mixed>>` - Lignes qui satisfont le filtre
 
 ---
 
-### `getLastLine(string $filePath, ?JsonlProcessingContext $context = null): ?array`
+### `getLastLine(string $filePath): ?array`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePath` | `string` | Chemin du fichier |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `array<string, mixed>|null` - Dernière ligne ou null
 
 ---
 
-### `getFirstLine(string $filePath, ?JsonlProcessingContext $context = null): ?array`
+### `getFirstLine(string $filePath): ?array`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$filePath` | `string` | Chemin du fichier |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `array<string, mixed>|null` - Première ligne ou null
 
 ---
 
-### `cleanOlderThan(int $days, string $basePath, ?JsonlProcessingContext $context = null): int`
+### `cleanOlderThan(int $days, string $basePath): int`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$days` | `int` | Âge maximum en jours |
 | `$basePath` | `string` | Répertoire racine |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `int` - Nombre de fichiers supprimés
 
@@ -243,13 +232,12 @@ $deleted = $service->cleanOlderThan(30, '/var/logs');
 
 ---
 
-### `cleanExpired(string $basePath, callable $isExpired, ?JsonlProcessingContext $context = null): int`
+### `cleanExpired(string $basePath, callable $isExpired): int`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$basePath` | `string` | Répertoire racine |
 | `$isExpired` | `callable(array<string, mixed> $line): bool` | Fonction déterminant si une ligne est expirée |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `int` - Nombre d'entrées supprimées
 
@@ -262,12 +250,11 @@ $deleted = $service->cleanExpired('/cache', function ($line) {
 
 ---
 
-### `cleanByPattern(string $pattern, ?JsonlProcessingContext $context = null): int`
+### `cleanByPattern(string $pattern): int`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$pattern` | `string` | Pattern glob (ex: `/logs/*.jsonl`) |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `int` - Nombre de fichiers supprimés
 
@@ -280,13 +267,12 @@ echo "Deleted {$deletedCount} files";
 
 ---
 
-### `dryRun(string $basePath, callable $filter, ?JsonlProcessingContext $context = null): array`
+### `dryRun(string $basePath, callable $filter): array`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$basePath` | `string` | Répertoire racine à scanner |
 | `$filter` | `callable(string $filePath): bool` | Fonction qui détermine quels fichiers supprimer |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `array<string>` - Liste des fichiers qui seraient supprimés (sans les supprimer réellement)
 
@@ -304,12 +290,11 @@ echo "Total files that would be deleted: " . count($filesToDelete);
 
 ---
 
-### `clear(string $basePath, ?JsonlProcessingContext $context = null): int`
+### `clear(string $basePath): int`
 
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `$basePath` | `string` | Répertoire racine à vider |
-| `$context` | `JsonlProcessingContext|null` | Contexte optionnel |
 
 **Retourne :** `int` - Nombre de fichiers supprimés
 
@@ -580,6 +565,39 @@ echo $decoded->email; // 'john@example.com'
 
 ---
 
+### `getContext(): JsonlContext`
+
+| Paramètre | Type | Description |
+|-----------|------|-------------|
+| Aucun | - | - |
+
+**Retourne :** `JsonlContext` - Le contexte unifié contenant l'état des locks, du buffer et du traitement
+
+**Exemple :**
+```php
+$context = $service->getContext();
+if ($context->hasError()) {
+    echo "Last error: " . $context->getLastError();
+}
+```
+
+---
+
+### `resetProcessingState(): self`
+
+| Paramètre | Type | Description |
+|-----------|------|-------------|
+| Aucun | - | - |
+
+**Retourne :** `self` - L'instance du service pour le chaînage
+
+**Exemple :**
+```php
+$service->resetProcessingState();
+```
+
+---
+
 ## Constructeur
 
 ### `__construct(JsonlPathStrategyInterface $pathStrategy, FileSystemInterface $fileSystem, JsonlContext $context, ?int $defaultBufferSize = null, PermissionMode $directoryPermission = PermissionMode::DIRECTORY)`
@@ -588,7 +606,7 @@ echo $decoded->email; // 'john@example.com'
 |-----------|------|-------------|
 | `$pathStrategy` | `JsonlPathStrategyInterface` | Stratégie de génération des chemins |
 | `$fileSystem` | `FileSystemInterface` | Service de gestion des fichiers |
-| `$context` | `JsonlContext` | Contexte pour l'état (locks, buffer) |
+| `$context` | `JsonlContext` | Contexte unifié pour l'état (locks, buffer, traitement) |
 | `$defaultBufferSize` | `int|null` | Taille par défaut du buffer (null = désactivé) |
 | `$directoryPermission` | `PermissionMode` | Permissions des dossiers créés |
 
@@ -724,7 +742,7 @@ echo "Total entries after atomic operation: {$result}";
 
 - Une `JsonlPathStrategyInterface` (ex: `TemporalPathStrategy` ou `KeyBasedPathStrategy`)
 - Une `FileSystemInterface` (ex: `FileSystemService` de `php-services`)
-- Un `JsonlContext` pour la gestion d'état
+- Un `JsonlContext` pour la gestion d'état unifiée
 
 ```php
 $strategy = new TemporalPathStrategy('/logs');
@@ -787,12 +805,12 @@ $service = new JsonlService($strategy, $fileSystem, $context);
 declare(strict_types=1);
 
 use AndyDefer\DomainStructures\Structures\StrictDataObject;
-use AndyDefer\LaravelJsonl\Contexts\JsonlContext;
-use AndyDefer\LaravelJsonl\JsonlService;
-use AndyDefer\LaravelJsonl\Records\CacheJsonlRecord;
-use AndyDefer\LaravelJsonl\Records\LogJsonlRecord;
-use AndyDefer\LaravelJsonl\Strategies\KeyBasedPathStrategy;
-use AndyDefer\LaravelJsonl\Strategies\TemporalPathStrategy;
+use AndyDefer\PhpJsonl\Contexts\JsonlContext;
+use AndyDefer\PhpJsonl\JsonlService;
+use AndyDefer\PhpJsonl\Records\CacheJsonlRecord;
+use AndyDefer\PhpJsonl\Records\LogJsonlRecord;
+use AndyDefer\PhpJsonl\Strategies\KeyBasedPathStrategy;
+use AndyDefer\PhpJsonl\Strategies\TemporalPathStrategy;
 use AndyDefer\PhpServices\Services\FileSystemService;
 use AndyDefer\PhpVo\ValueObjects\DateTimeVO;
 
@@ -854,18 +872,26 @@ for ($i = 0; $i < 1000; $i++) {
     $logService->writeBuffered(new LogJsonlRecord(/* ... */));
 }
 $logService->flushBuffer();
+
+// 9. Accès au contexte
+$context = $logService->getContext();
+echo "Total lines processed: " . $context->getTotalLinesProcessed();
+
+// 10. Réinitialisation de l'état de traitement
+$logService->resetProcessingState();
 ```
 
 ---
 
 ## Voir aussi
 
-- `JsonlContext` - Contexte pour l'état (locks et buffer)
+- `JsonlContext` - Contexte unifié pour l'état (locks, buffer, traitement)
 - `TemporalPathStrategy` - Stratégie pour logs (organisation par date/heure)
 - `KeyBasedPathStrategy` - Stratégie pour cache (organisation par hash)
-- `JsonlProcessingContext` - Suivi d'état des opérations
 - `FileSystemInterface` - Abstraction des opérations fichier
 - `JsonlLockVO` - Value object représentant un verrou
 - `JsonlException` - Exception de base du package
 - `JsonlLockException` - Exception spécifique aux verrous
+- `OperationType` - Énumération des types d'opérations
+- `PermissionMode` - Énumération des permissions de fichiers
 ---

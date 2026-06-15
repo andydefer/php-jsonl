@@ -5,22 +5,32 @@ declare(strict_types=1);
 namespace AndyDefer\PhpJsonl\Contexts;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
+use AndyDefer\DomainStructures\Collections\Utility\IntTypedCollection;
+use AndyDefer\DomainStructures\Collections\Utility\StringTypedCollection;
+use AndyDefer\PhpJsonl\Enums\OperationType;
 use AndyDefer\PhpJsonl\ValueObjects\JsonlLockVO;
+use AndyDefer\PhpVo\ValueObjects\DateTimeVO;
 
 /**
  * Unified context for JSONL service state management.
  *
- * Holds both lock and buffer state for the JSONL service.
+ * Holds lock state, buffer state, and processing state for the JSONL service.
  *
  * @author Andy Defer
  */
 final class JsonlContext
 {
-    // Lock state
+    // ============================================================
+    // Lock State
+    // ============================================================
+
     /** @var array<string, JsonlLockVO> */
     private array $locks = [];
 
-    // Buffer state
+    // ============================================================
+    // Buffer State
+    // ============================================================
+
     /** @var array<string, array<AbstractRecord>> */
     private array $buffer = [];
 
@@ -28,6 +38,39 @@ final class JsonlContext
 
     /** @var callable(string, int):void|null */
     private $onFlushCallback = null;
+
+    // ============================================================
+    // Processing State
+    // ============================================================
+
+    private OperationType $currentOperation;
+
+    private StringTypedCollection $processedFiles;
+
+    private IntTypedCollection $writtenLines;
+
+    private ?string $lastError;
+
+    private int $totalLinesProcessed;
+
+    private float $startTime;
+
+    private ?float $endTime;
+
+    // ============================================================
+    // Constructor
+    // ============================================================
+
+    public function __construct()
+    {
+        $this->currentOperation = OperationType::IDLE;
+        $this->processedFiles = new StringTypedCollection;
+        $this->writtenLines = new IntTypedCollection;
+        $this->lastError = null;
+        $this->totalLinesProcessed = 0;
+        $this->startTime = microtime(true);
+        $this->endTime = null;
+    }
 
     // ============================================================
     // Lock Management
@@ -187,5 +230,121 @@ final class JsonlContext
         if ($this->onFlushCallback !== null) {
             call_user_func($this->onFlushCallback, $filePath, $count);
         }
+    }
+
+    // ============================================================
+    // Processing State - Getters
+    // ============================================================
+
+    public function getCurrentOperation(): OperationType
+    {
+        return $this->currentOperation;
+    }
+
+    public function getProcessedFiles(): StringTypedCollection
+    {
+        return $this->processedFiles;
+    }
+
+    public function getWrittenLines(): IntTypedCollection
+    {
+        return $this->writtenLines;
+    }
+
+    public function getLastError(): ?string
+    {
+        return $this->lastError;
+    }
+
+    public function getTotalLinesProcessed(): int
+    {
+        return $this->totalLinesProcessed;
+    }
+
+    public function getStartTime(): float
+    {
+        return $this->startTime;
+    }
+
+    public function getEndTime(): ?float
+    {
+        return $this->endTime;
+    }
+
+    public function getDuration(): ?float
+    {
+        return $this->endTime !== null ? $this->endTime - $this->startTime : null;
+    }
+
+    public function getStartDateTime(): DateTimeVO
+    {
+        return new DateTimeVO(date('c', (int) $this->startTime));
+    }
+
+    // ============================================================
+    // Processing State - Setters
+    // ============================================================
+
+    public function setCurrentOperation(OperationType $operation): void
+    {
+        $this->currentOperation = $operation;
+    }
+
+    public function addProcessedFile(string $filePath): void
+    {
+        $this->processedFiles->add($filePath);
+    }
+
+    public function addWrittenLines(string $filePath, int $count): void
+    {
+        $this->writtenLines->add($count);
+        $this->totalLinesProcessed += $count;
+    }
+
+    public function setLastError(string $error): void
+    {
+        $this->lastError = $error;
+        $this->currentOperation = OperationType::FAILED;
+    }
+
+    public function complete(): void
+    {
+        $this->endTime = microtime(true);
+        $this->currentOperation = OperationType::COMPLETED;
+    }
+
+    public function reset(): void
+    {
+        $this->currentOperation = OperationType::IDLE;
+        $this->processedFiles = new StringTypedCollection;
+        $this->writtenLines = new IntTypedCollection;
+        $this->lastError = null;
+        $this->totalLinesProcessed = 0;
+        $this->startTime = microtime(true);
+        $this->endTime = null;
+    }
+
+    // ============================================================
+    // Processing State - Questions
+    // ============================================================
+
+    public function hasError(): bool
+    {
+        return $this->lastError !== null;
+    }
+
+    public function isCompleted(): bool
+    {
+        return $this->currentOperation === OperationType::COMPLETED;
+    }
+
+    public function isFailed(): bool
+    {
+        return $this->currentOperation === OperationType::FAILED;
+    }
+
+    public function isIdle(): bool
+    {
+        return $this->currentOperation === OperationType::IDLE;
     }
 }

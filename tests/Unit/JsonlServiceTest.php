@@ -914,4 +914,36 @@ final class JsonlServiceTest extends TestCase
         $this->assertStringContainsString('user_123.jsonl', $result);
         $this->assertStringNotContainsString('2026-01-15', $result);
     }
+
+    // ============================================================
+    // Tests pour getContext() et resetProcessingState()
+    // ============================================================
+
+    public function test_get_context_returns_the_context(): void
+    {
+        // Act
+        $context = $this->service->getContext();
+
+        // Assert
+        $this->assertSame($this->context, $context);
+    }
+
+    public function test_reset_processing_state_resets_context(): void
+    {
+        // Arrange
+        $this->service->write(new LogJsonlRecord(
+            time: new DateTimeVO('2026-01-15T14:35:00+00:00'),
+            level: 'info',
+            type: 'test',
+            payload: new StrictDataObject,
+        ));
+
+        // Act
+        $result = $this->service->resetProcessingState();
+
+        // Assert
+        $this->assertSame($this->service, $result);
+        $this->assertFalse($this->context->hasError());
+        $this->assertTrue($this->context->isIdle());
+    }
 }

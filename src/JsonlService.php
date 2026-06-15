@@ -8,7 +8,6 @@ use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
 use AndyDefer\DomainStructures\Normalizers\NormalizerChain;
 use AndyDefer\DomainStructures\Utils\StrictDataObject;
 use AndyDefer\PhpJsonl\Contexts\JsonlContext;
-use AndyDefer\PhpJsonl\Contexts\JsonlProcessingContext;
 use AndyDefer\PhpJsonl\Contracts\JsonlCleanerInterface;
 use AndyDefer\PhpJsonl\Contracts\JsonlLockInterface;
 use AndyDefer\PhpJsonl\Contracts\JsonlPathStrategyInterface;
@@ -27,7 +26,7 @@ use Throwable;
 /**
  * Main service for JSONL (JSON Lines) storage operations.
  *
- * This service is stateless. All state (locks, buffer) is managed
+ * This service is stateless. All state (locks, buffer, processing) is managed
  * through the injected JsonlContext.
  *
  * @author Andy Defer
@@ -46,6 +45,24 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
         }
     }
 
+    /**
+     * Get the current context (includes processing state).
+     */
+    public function getContext(): JsonlContext
+    {
+        return $this->context;
+    }
+
+    /**
+     * Reset the processing state (clear stats, errors, etc.).
+     */
+    public function resetProcessingState(): self
+    {
+        $this->context->reset();
+
+        return $this;
+    }
+
     // ============================================================
     // JsonlWriterInterface Implementation
     // ============================================================
@@ -53,10 +70,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function write(AbstractRecord $entity, bool $lock = true, ?JsonlProcessingContext $context = null): void
+    public function write(AbstractRecord $entity, bool $lock = true): void
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::WRITING);
+        $this->context->setCurrentOperation(OperationType::WRITING);
 
         try {
             $filePath = $this->pathStrategy->getFilePath($entity);
@@ -65,10 +81,10 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
 
             $this->ensureDirectoryExists($filePath);
 
-            $writeOperation = function () use ($filePath, $jsonLine, $context): void {
+            $writeOperation = function () use ($filePath, $jsonLine): void {
                 $this->fileSystem->append($filePath, $jsonLine);
-                $context->addWrittenLines($filePath, 1);
-                $context->addProcessedFile($filePath);
+                $this->context->addWrittenLines($filePath, 1);
+                $this->context->addProcessedFile($filePath);
             };
 
             if ($lock) {
@@ -77,9 +93,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
                 $writeOperation();
             }
 
-            $context->complete();
+            $this->context->complete();
         } catch (Throwable $e) {
-            $context->setLastError($e->getMessage());
+            $this->context->setLastError($e->getMessage());
             throw new JsonlException($e->getMessage(), 0, $e);
         }
     }
@@ -87,14 +103,13 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function writeBatch(array $entities, bool $lock = true, ?JsonlProcessingContext $context = null): void
+    public function writeBatch(array $entities, bool $lock = true): void
     {
         if (empty($entities)) {
             return;
         }
 
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::BATCH_WRITING);
+        $this->context->setCurrentOperation(OperationType::BATCH_WRITING);
 
         try {
             $firstEntity = $entities[0];
@@ -102,7 +117,7 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
 
             $this->ensureDirectoryExists($filePath);
 
-            $writeOperation = function () use ($filePath, $entities, $context): void {
+            $writeOperation = function () use ($filePath, $entities): void {
                 $content = '';
 
                 foreach ($entities as $entity) {
@@ -111,8 +126,8 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
                 }
 
                 $this->fileSystem->append($filePath, $content);
-                $context->addWrittenLines($filePath, count($entities));
-                $context->addProcessedFile($filePath);
+                $this->context->addWrittenLines($filePath, count($entities));
+                $this->context->addProcessedFile($filePath);
             };
 
             if ($lock) {
@@ -121,9 +136,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
                 $writeOperation();
             }
 
-            $context->complete();
+            $this->context->complete();
         } catch (Throwable $e) {
-            $context->setLastError($e->getMessage());
+            $this->context->setLastError($e->getMessage());
             throw new JsonlException($e->getMessage(), 0, $e);
         }
     }
@@ -131,10 +146,10 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function writeBuffered(AbstractRecord $entity, ?JsonlProcessingContext $context = null): void
+    public function writeBuffered(AbstractRecord $entity): void
     {
         if (! $this->context->isBufferEnabled()) {
-            $this->write($entity, true, $context);
+            $this->write($entity, true);
 
             return;
         }
@@ -145,25 +160,23 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
         $buffer = $this->context->getFileBuffer($filePath);
 
         if (count($buffer) >= $this->context->getBufferSize()) {
-            $this->flushBuffer($filePath, $context);
+            $this->flushBuffer($filePath);
         }
     }
 
     /**
      * {@inheritDoc}
      */
-    public function flushBuffer(?string $filePath = null, ?JsonlProcessingContext $context = null): void
+    public function flushBuffer(?string $filePath = null): void
     {
-        $context ??= new JsonlProcessingContext;
-
         if ($filePath !== null) {
-            $this->flushSingleBuffer($filePath, $context);
+            $this->flushSingleBuffer($filePath);
 
             return;
         }
 
         foreach (array_keys($this->context->getBuffer()) as $path) {
-            $this->flushSingleBuffer($path, $context);
+            $this->flushSingleBuffer($path);
         }
     }
 
@@ -215,10 +228,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function readAll(string $filePath, ?JsonlProcessingContext $context = null): array
+    public function readAll(string $filePath): array
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::READING);
+        $this->context->setCurrentOperation(OperationType::READING);
 
         if (! $this->fileSystem->exists($filePath)) {
             return [];
@@ -226,12 +238,12 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
 
         $lines = [];
 
-        $this->readLineByLine($filePath, function ($line) use (&$lines, $context, $filePath): void {
+        $this->readLineByLine($filePath, function ($line) use (&$lines, $filePath): void {
             $lines[] = $line;
-            $context->addWrittenLines($filePath, 1);
-        }, $context);
+            $this->context->addWrittenLines($filePath, 1);
+        });
 
-        $context->complete();
+        $this->context->complete();
 
         return $lines;
     }
@@ -239,10 +251,8 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function readLineByLine(string $filePath, callable $callback, ?JsonlProcessingContext $context = null): void
+    public function readLineByLine(string $filePath, callable $callback): void
     {
-        $context ??= new JsonlProcessingContext;
-
         if (! $this->fileSystem->exists($filePath)) {
             throw new JsonlException("File does not exist: {$filePath}");
         }
@@ -268,21 +278,20 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function search(string $filePath, callable $filter, ?JsonlProcessingContext $context = null): array
+    public function search(string $filePath, callable $filter): array
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::SEARCHING);
+        $this->context->setCurrentOperation(OperationType::SEARCHING);
 
         $results = [];
 
-        $this->readLineByLine($filePath, function ($line) use ($filter, &$results, $context, $filePath): void {
+        $this->readLineByLine($filePath, function ($line) use ($filter, &$results, $filePath): void {
             if ($filter($line)) {
                 $results[] = $line;
             }
-            $context->addWrittenLines($filePath, 1);
-        }, $context);
+            $this->context->addWrittenLines($filePath, 1);
+        });
 
-        $context->complete();
+        $this->context->complete();
 
         return $results;
     }
@@ -290,10 +299,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function searchMultiple(array $filePaths, callable $filter, ?JsonlProcessingContext $context = null): array
+    public function searchMultiple(array $filePaths, callable $filter): array
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::SEARCHING_MULTIPLE);
+        $this->context->setCurrentOperation(OperationType::SEARCHING_MULTIPLE);
 
         $results = [];
 
@@ -302,12 +310,12 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
                 continue;
             }
 
-            $fileResults = $this->search($filePath, $filter, $context);
+            $fileResults = $this->search($filePath, $filter);
             $results = array_merge($results, $fileResults);
-            $context->addProcessedFile($filePath);
+            $this->context->addProcessedFile($filePath);
         }
 
-        $context->complete();
+        $this->context->complete();
 
         return $results;
     }
@@ -315,10 +323,8 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function getLastLine(string $filePath, ?JsonlProcessingContext $context = null): ?array
+    public function getLastLine(string $filePath): ?array
     {
-        $context ??= new JsonlProcessingContext;
-
         if (! $this->fileSystem->exists($filePath)) {
             return null;
         }
@@ -339,10 +345,8 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function getFirstLine(string $filePath, ?JsonlProcessingContext $context = null): ?array
+    public function getFirstLine(string $filePath): ?array
     {
-        $context ??= new JsonlProcessingContext;
-
         if (! $this->fileSystem->exists($filePath)) {
             return null;
         }
@@ -368,10 +372,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function cleanOlderThan(int $days, string $basePath, ?JsonlProcessingContext $context = null): int
+    public function cleanOlderThan(int $days, string $basePath): int
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::CLEANING_OLDER_THAN);
+        $this->context->setCurrentOperation(OperationType::CLEANING_OLDER_THAN);
 
         $cutoffTime = time() - ($days * 86400);
         $deletedCount = 0;
@@ -383,12 +386,12 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
             if ($this->fileSystem->lastModified($file) < $cutoffTime) {
                 if ($this->fileSystem->delete($file)) {
                     $deletedCount++;
-                    $context->addProcessedFile($file);
+                    $this->context->addProcessedFile($file);
                 }
             }
         }
 
-        $context->complete();
+        $this->context->complete();
 
         return $deletedCount;
     }
@@ -396,13 +399,12 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function cleanExpired(string $basePath, callable $isExpired, ?JsonlProcessingContext $context = null): int
+    public function cleanExpired(string $basePath, callable $isExpired): int
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::CLEANING_EXPIRED);
+        $this->context->setCurrentOperation(OperationType::CLEANING_EXPIRED);
 
         if (! is_dir($basePath)) {
-            $context->complete();
+            $this->context->complete();
 
             return 0;
         }
@@ -411,8 +413,8 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
         $files = $this->findAllJsonlFiles($basePath);
 
         foreach ($files as $filePath) {
-            $this->executeWithLock($filePath, function () use ($filePath, $isExpired, &$deletedCount, $context): void {
-                $lines = $this->readAll($filePath, $context);
+            $this->executeWithLock($filePath, function () use ($filePath, $isExpired, &$deletedCount): void {
+                $lines = $this->readAll($filePath);
                 $validLines = [];
 
                 foreach ($lines as $line) {
@@ -423,11 +425,11 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
                     }
                 }
 
-                $this->applyCleanupToFile($filePath, $validLines, $context);
+                $this->applyCleanupToFile($filePath, $validLines);
             });
         }
 
-        $context->complete();
+        $this->context->complete();
 
         return $deletedCount;
     }
@@ -435,10 +437,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function cleanByPattern(string $pattern, ?JsonlProcessingContext $context = null): int
+    public function cleanByPattern(string $pattern): int
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::CLEANING_BY_PATTERN);
+        $this->context->setCurrentOperation(OperationType::CLEANING_BY_PATTERN);
 
         $deletedCount = 0;
         $files = $this->fileSystem->glob($pattern);
@@ -446,11 +447,11 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
         foreach ($files as $file) {
             if ($this->fileSystem->delete($file)) {
                 $deletedCount++;
-                $context->addProcessedFile($file);
+                $this->context->addProcessedFile($file);
             }
         }
 
-        $context->complete();
+        $this->context->complete();
 
         return $deletedCount;
     }
@@ -458,10 +459,9 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function dryRun(string $basePath, callable $filter, ?JsonlProcessingContext $context = null): array
+    public function dryRun(string $basePath, callable $filter): array
     {
-        $context ??= new JsonlProcessingContext;
-        $context->setCurrentOperation(OperationType::DRY_RUN);
+        $this->context->setCurrentOperation(OperationType::DRY_RUN);
 
         $filesToDelete = [];
         $pattern = rtrim($basePath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'**'.DIRECTORY_SEPARATOR.'*.jsonl';
@@ -470,11 +470,11 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
         foreach ($files as $file) {
             if ($filter($file)) {
                 $filesToDelete[] = $file;
-                $context->addProcessedFile($file);
+                $this->context->addProcessedFile($file);
             }
         }
 
-        $context->complete();
+        $this->context->complete();
 
         return $filesToDelete;
     }
@@ -482,11 +482,11 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * {@inheritDoc}
      */
-    public function clear(string $basePath, ?JsonlProcessingContext $context = null): int
+    public function clear(string $basePath): int
     {
         $pattern = rtrim($basePath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'**'.DIRECTORY_SEPARATOR.'*.jsonl';
 
-        return $this->cleanByPattern($pattern, $context);
+        return $this->cleanByPattern($pattern);
     }
 
     // ============================================================
@@ -668,7 +668,7 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     /**
      * Flushes the buffer for a single file path.
      */
-    private function flushSingleBuffer(string $filePath, JsonlProcessingContext $context): void
+    private function flushSingleBuffer(string $filePath): void
     {
         $buffer = $this->context->getFileBuffer($filePath);
 
@@ -685,7 +685,7 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
 
         $this->fileSystem->append($filePath, $content);
         $count = count($buffer);
-        $context->addWrittenLines($filePath, $count);
+        $this->context->addWrittenLines($filePath, $count);
 
         $this->context->clearFileBuffer($filePath);
         $this->context->triggerOnFlush($filePath, $count);
@@ -716,11 +716,11 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
      *
      * @param  array<array<string, mixed>>  $validLines  Lines to keep
      */
-    private function applyCleanupToFile(string $filePath, array $validLines, JsonlProcessingContext $context): void
+    private function applyCleanupToFile(string $filePath, array $validLines): void
     {
         if (empty($validLines)) {
             $this->fileSystem->delete($filePath);
-            $context->addProcessedFile($filePath);
+            $this->context->addProcessedFile($filePath);
 
             return;
         }
