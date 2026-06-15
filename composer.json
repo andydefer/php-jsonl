@@ -1,6 +1,6 @@
 {
     "name": "andydefer/php-jsonl",
-    "description": "Jsonl Managing PHP",
+    "description": "High-performance JSONL (JSON Lines) file management library with temporal and key-based storage strategies, automatic batching, and cache expiration",
     "license": "MIT",
     "autoload": {
         "psr-4": {
