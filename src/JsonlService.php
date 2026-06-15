@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Andydefer\PhpJsonl;
+namespace AndyDefer\PhpJsonl;
 
 use AndyDefer\DomainStructures\Abstracts\AbstractRecord;
 use AndyDefer\DomainStructures\Normalizers\NormalizerChain;
