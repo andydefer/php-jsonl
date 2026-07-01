@@ -946,4 +946,91 @@ final class JsonlServiceTest extends TestCase
         $this->assertFalse($this->context->hasError());
         $this->assertTrue($this->context->isIdle());
     }
+
+    // ============================================================
+    // Tests pour deleteFile()
+    // ============================================================
+
+    public function test_delete_file_returns_true_and_deletes_existing_file(): void
+    {
+        // Arrange
+        $record = new LogJsonlRecord(
+            time: new DateTimeVO('2026-01-15T14:35:00+00:00'),
+            level: 'info',
+            type: 'test',
+            payload: new StrictDataObject,
+        );
+
+        $filePath = $this->service->getFilePath($record);
+        $this->service->write($record);
+
+        $this->assertFileExists($filePath);
+
+        // Act
+        $result = $this->service->deleteFile($filePath);
+
+        // Assert
+        $this->assertTrue($result);
+        $this->assertFileDoesNotExist($filePath);
+    }
+
+    public function test_delete_file_returns_false_for_non_existent_file(): void
+    {
+        // Arrange
+        $filePath = $this->tempDir.'/non_existent.jsonl';
+
+        // Act
+        $result = $this->service->deleteFile($filePath);
+
+        // Assert
+        $this->assertFalse($result);
+    }
+
+    public function test_delete_file_with_cache_record(): void
+    {
+        // Arrange
+        $service = $this->createKeyBasedService();
+
+        $record = new CacheJsonlRecord(
+            key: 'user_123',
+            value: json_encode(['name' => 'John']),
+            expires_at: null,
+        );
+
+        $filePath = $service->getFilePath($record);
+        $service->write($record);
+
+        $this->assertFileExists($filePath);
+
+        // Act
+        $result = $service->deleteFile($filePath);
+
+        // Assert
+        $this->assertTrue($result);
+        $this->assertFileDoesNotExist($filePath);
+    }
+
+    public function test_delete_file_cleans_up_context_stats(): void
+    {
+        // Arrange
+        $record = new LogJsonlRecord(
+            time: new DateTimeVO('2026-01-15T14:35:00+00:00'),
+            level: 'info',
+            type: 'test',
+            payload: new StrictDataObject,
+        );
+
+        $filePath = $this->service->getFilePath($record);
+        $this->service->write($record);
+
+        // Act
+        $this->service->deleteFile($filePath);
+
+        // Assert - le fichier n'existe plus
+        $this->assertFileDoesNotExist($filePath);
+
+        // Le contexte devrait toujours être accessible
+        $context = $this->service->getContext();
+        $this->assertNotNull($context);
+    }
 }

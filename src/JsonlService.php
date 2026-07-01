@@ -54,6 +54,14 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
     }
 
     /**
+     * Get the current context (includes processing state).
+     */
+    public function getFileSystem(): FileSystemInterface
+    {
+        return $this->fileSystem;
+    }
+
+    /**
      * Reset the processing state (clear stats, errors, etc.).
      */
     public function resetProcessingState(): self
@@ -487,6 +495,18 @@ class JsonlService implements JsonlCleanerInterface, JsonlLockInterface, JsonlRe
         $pattern = rtrim($basePath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'**'.DIRECTORY_SEPARATOR.'*.jsonl';
 
         return $this->cleanByPattern($pattern);
+    }
+
+    /**
+     * Delete a file.
+     */
+    public function deleteFile(string $filePath): bool
+    {
+        if (! $this->fileSystem->exists($filePath)) {
+            return false;
+        }
+
+        return $this->fileSystem->delete($filePath);
     }
 
     // ============================================================

@@ -48,4 +48,9 @@ interface JsonlCleanerInterface
      * @return int Nombre de fichiers supprimés
      */
     public function clear(string $basePath): int;
+
+    /**
+     * Delete a file.
+     */
+    public function deleteFile(string $filePath): bool;
 }
