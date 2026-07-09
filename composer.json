@@ -20,7 +20,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "andydefer/php-services": "^1.3.0"
+        "andydefer/php-services": "^1.4"
     },
     "require-dev": {
         "composer/composer": "^2.0",
@@ -29,7 +29,8 @@
         "vimeo/psalm": "^6.14",
         "friendsofphp/php-cs-fixer": "^3.95",
         "mockery/mockery": "^1.6",
-        "laravel/pint": "^1.29"
+        "laravel/pint": "^1.29",
+        "nesbot/carbon": "^3.13"
     },
     "scripts": {
         "test": "phpunit",
