@@ -20,7 +20,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "andydefer/php-services": "^1.6.28"
+        "andydefer/php-services": "^1.6.29"
     },
     "require-dev": {
         "composer/composer": "^2.0",
